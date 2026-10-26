@@ -185,7 +185,7 @@
       next.src = full(item.id);
       count.textContent = String(index + 1).padStart(2, '0') + ' / ' + String(list.length).padStart(2, '0');
       title.textContent = item.title;
-      const parts = [item.loc, item.cat && CATEGORY_LABEL[item.cat], item.dur && 'Film · ' + item.dur].filter(Boolean);
+      const parts = [item.loc, item.cat && CATEGORY_LABEL[item.cat], item.dur && 'Film still · ' + item.dur].filter(Boolean);
       meta.textContent = parts.join(' — ');
       // Warm the neighbours
       [list[(index + 1) % list.length], list[(index - 1 + list.length) % list.length]].forEach((n) => { new Image().src = full(n.id); });
@@ -265,14 +265,16 @@
 
   const tileHTML = (w, i) => {
     const size = PATTERN[i % PATTERN.length];
-    const width = size === 'l' || size === 'w' ? 1400 : 900;
+    const wide = size === 'l' || size === 'w';
+    const srcset = [600, 900, 1400].map((px) => `${img(w.id, px)} ${px}w`).join(', ');
+    const sizes = wide ? '(max-width: 760px) 100vw, 58vw' : '(max-width: 760px) 50vw, 42vw';
     return `
       <article class="tile tile--${size}" data-index="${i}" tabindex="0" role="button"
                aria-label="Open ${w.title.replace(/"/g, '&quot;')}, ${w.loc}">
         <div class="tile__card">
           <div class="tile__media">
-            <img src="${img(w.id, width)}" alt="${w.title} — ${w.loc}" loading="lazy" decoding="async">
-            ${w.dur ? `<span class="tile__play" aria-hidden="true">Play</span><span class="tile__dur">${w.dur}</span>` : ''}
+            <img src="${img(w.id, wide ? 1400 : 900)}" srcset="${srcset}" sizes="${sizes}" alt="${w.title} — ${w.loc}" loading="lazy" decoding="async">
+            ${w.dur ? `<span class="tile__play" aria-hidden="true">Film</span><span class="tile__dur">${w.dur}</span>` : ''}
             <span class="tile__tag">${CATEGORY_LABEL[w.cat]}</span>
           </div>
           <div class="tile__info">
@@ -298,7 +300,7 @@
           card.style.transform = `rotateX(${(-y * 5).toFixed(2)}deg) rotateY(${(x * 7).toFixed(2)}deg) translateZ(0)`;
         });
       }
-      tile.addEventListener('pointerenter', () => showCursor(currentList[i].dur ? 'Play' : 'View'));
+      tile.addEventListener('pointerenter', () => showCursor('View'));
       tile.addEventListener('pointerleave', () => { card.style.transform = ''; hideCursor(); });
     });
   };
@@ -491,11 +493,49 @@
   })();
 
   /* ------------------------------------------------------------------
+     Config-driven content (js/config.js). Unverified items stay hidden.
+     ------------------------------------------------------------------ */
+  const CONFIG = window.SITE_CONFIG || {};
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  if (CONFIG.email) {
+    $$('[data-email]').forEach((a) => { a.href = 'mailto:' + CONFIG.email; a.textContent = CONFIG.email; });
+  }
+
+  $$('[data-price]').forEach((el) => {
+    const price = (CONFIG.prices || {})[el.dataset.price];
+    if (price) el.textContent = price; else el.hidden = true;
+  });
+
+  if (CONFIG.showStats && Array.isArray(CONFIG.stats) && CONFIG.stats.length) {
+    const stats = $('#stats');
+    stats.innerHTML = CONFIG.stats.map((s) => `<div><strong>${esc(s.value)}</strong><span>${esc(s.label)}</span></div>`).join('');
+    stats.hidden = false;
+  }
+
+  if (CONFIG.showPress && Array.isArray(CONFIG.press) && CONFIG.press.length) {
+    const press = $('#press');
+    press.innerHTML = CONFIG.press.map((p) => `<li>${esc(p)}</li>`).join('');
+    press.hidden = false;
+  }
+
+  if (CONFIG.showTestimonials && Array.isArray(CONFIG.testimonials) && CONFIG.testimonials.length) {
+    const wrap = $('#testimonials');
+    wrap.insertAdjacentHTML('afterbegin', CONFIG.testimonials.map((t, n) => `
+      <figure class="testimonial${n === 0 ? ' is-active' : ''}">
+        <blockquote>“${esc(t.quote)}”</blockquote>
+        <figcaption>${esc(t.name)} <span>${esc(t.detail || '')}</span></figcaption>
+      </figure>`).join(''));
+    wrap.hidden = false;
+  }
+
+  /* ------------------------------------------------------------------
      Testimonials
      ------------------------------------------------------------------ */
   (() => {
     const items = $$('.testimonial');
     const dots = $('.testimonials__dots');
+    if (items.length < 2) return;
     let i = 0, timer;
     items.forEach((_, n) => {
       const b = document.createElement('button');
@@ -515,15 +555,24 @@
   })();
 
   /* ------------------------------------------------------------------
-     Contact form (client-side validation; wire `action` to a real endpoint)
+     Contact form
+     Posts to CONFIG.formEndpoint when one is set and reports success only
+     on a 2xx response. Without an endpoint it hands the enquiry to the
+     visitor's email app rather than pretending it was sent.
      ------------------------------------------------------------------ */
   (() => {
     const form = $('#contactForm');
-    const success = $('.form__success', form);
+    const status = $('.form__status', form);
     const btn = $('.form__submit', form);
+    const btnLabel = $('span', btn);
+    const dateInput = form.elements.date;
+    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    dateInput.min = today;
+
     const rules = {
       name: (v) => v.trim().length > 1,
       email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim()),
+      date: (v) => !v || v >= today,
       type: (v) => !!v
     };
     const check = (el) => {
@@ -535,23 +584,68 @@
     Object.keys(rules).forEach((n) => {
       const el = form.elements[n];
       el.addEventListener('blur', () => { if (el.value) check(el); });
-      el.addEventListener('input', () => { if (el.closest('.field').classList.contains('is-invalid')) check(el); });
+      el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => {
+        if (el.closest('.field').classList.contains('is-invalid')) check(el);
+      });
     });
-    form.addEventListener('submit', (e) => {
+
+    const setStatus = (msg, kind) => {
+      status.textContent = msg;
+      status.className = 'form__status' + (kind ? ' is-' + kind : '');
+    };
+    const setBusy = (busy) => {
+      btn.disabled = busy;
+      form.setAttribute('aria-busy', String(busy));
+      btnLabel.textContent = busy ? 'Sending…' : 'Send enquiry';
+    };
+
+    // "Enquire" links in Services preselect the commission type
+    $$('[data-enquire]').forEach((a) => a.addEventListener('click', () => {
+      form.elements.type.value = a.dataset.enquire;
+      check(form.elements.type);
+    }));
+
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      setStatus('');
       const fields = Object.keys(rules).map((n) => form.elements[n]);
       const results = fields.map(check);
       const firstBad = fields[results.indexOf(false)];
       if (firstBad) { firstBad.focus(); return; }
-      btn.disabled = true;
-      $('span', btn).textContent = 'Sending…';
-      setTimeout(() => {
+
+      // Honeypot: real visitors never fill this hidden field
+      if (form.elements.company.value) { form.reset(); return; }
+
+      const data = new FormData(form);
+      data.delete('company');
+
+      if (!CONFIG.formEndpoint) {
+        const body = [
+          'Name: ' + data.get('name'),
+          'Email: ' + data.get('email'),
+          'Date: ' + (data.get('date') || 'Not decided yet'),
+          'Commission: ' + data.get('type'),
+          '',
+          data.get('message') || ''
+        ].join('\n');
+        const subject = `${data.get('type')} enquiry — ${data.get('name')}`;
+        window.location.href = `mailto:${CONFIG.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        setStatus(`Your email app should now open with your enquiry ready to send. If it doesn't, write to us at ${CONFIG.email}.`, 'info');
+        return;
+      }
+
+      setBusy(true);
+      try {
+        const res = await fetch(CONFIG.formEndpoint, { method: 'POST', body: data, headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         form.reset();
-        $('#f-date').type = 'text';
-        btn.disabled = false;
-        $('span', btn).textContent = 'Send enquiry';
-        success.hidden = false;
-      }, 900);
+        $$('.field', form).forEach((f) => f.classList.remove('is-invalid'));
+        setStatus('Thank you — your enquiry has been sent. We’ll be in touch soon.', 'success');
+      } catch (err) {
+        setStatus(`Sorry, your enquiry couldn’t be sent just now. Please try again, or email us at ${CONFIG.email}.`, 'error');
+      } finally {
+        setBusy(false);
+      }
     });
   })();
 
@@ -579,29 +673,31 @@
   /* ==================================================================
      Motion choreography (GSAP only)
      ================================================================== */
-  if (!motion) {
-    $$('[data-count]').forEach((el) => { el.textContent = el.dataset.count; });
-    return;
-  }
+  if (!motion) return;
 
   const isMobile = () => window.innerWidth < 760;
 
   /* ---------- Hero intro ---------- */
   const heroImg = $('.hero__media img');
   const frames = $$('.frame');
-  const restRot = [5, -4, 7, -6];
+  // Gentle resting tilt; deeper frames sit further back so the layers read as one composition
+  const restRot = [2.5, -2, 3, -2.5];
+  const restZ = [-40, 60, -120, -20];
   frames.forEach((f, i) => gsap.set(f, { rotation: restRot[i], transformPerspective: 1200 }));
 
+  // The photograph is visible almost immediately; type and frames follow it
   const intro = gsap.timeline({ defaults: { ease: 'expo.out' } });
   intro
-    .fromTo(heroImg, { scale: 1.28, opacity: 0 }, { scale: 1.06, opacity: 1, duration: 2.6, ease: 'power3.out' })
-    .fromTo('.hero__media', { clipPath: 'inset(6% 6% 6% 6% round 4px)' }, { clipPath: 'inset(0% 0% 0% 0% round 0px)', duration: 2.2, ease: 'expo.inOut' }, 0)
-    .fromTo(frames, { opacity: 0, z: -700, rotationY: -35, rotationX: 12 }, { opacity: 1, z: 0, rotationY: 0, rotationX: 0, duration: 2, stagger: 0.12 }, 0.9)
-    .fromTo('.hero__eyebrow', { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 1.2 }, 1.2)
-    .fromTo('.hero__title .line > span', { yPercent: 110 }, { yPercent: 0, duration: 1.6, stagger: 0.14 }, 1.3)
-    .fromTo('.hero__sub', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 1.3 }, 1.75)
-    .fromTo('.hero__ctas', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 1.3 }, 1.9)
-    .fromTo(['.hero__scroll', '.nav'], { opacity: 0 }, { opacity: 1, duration: 1.4 }, 2.0);
+    .fromTo(heroImg, { opacity: 0 }, { opacity: 1, duration: 0.9, ease: 'power2.out' })
+    .fromTo(heroImg, { scale: 1.2 }, { scale: 1.06, duration: 2.4, ease: 'power3.out' }, 0)
+    .fromTo('.hero__media', { clipPath: 'inset(5% 5% 5% 5% round 4px)' }, { clipPath: 'inset(0% 0% 0% 0% round 0px)', duration: 1.8, ease: 'expo.inOut' }, 0)
+    .fromTo('.nav', { opacity: 0 }, { opacity: 1, duration: 1 }, 0.3)
+    .fromTo(frames, { opacity: 0, z: -500, rotationY: -18, rotationX: 8 }, { opacity: 1, z: (i) => restZ[i], rotationY: 0, rotationX: 0, duration: 1.8, stagger: 0.12 }, 0.7)
+    .fromTo('.hero__eyebrow', { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 1.2 }, 0.9)
+    .fromTo('.hero__title .line > span', { yPercent: 110 }, { yPercent: 0, duration: 1.5, stagger: 0.14 }, 1.0)
+    .fromTo('.hero__sub', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 1.2 }, 1.4)
+    .fromTo('.hero__ctas', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 1.2 }, 1.55)
+    .fromTo('.hero__scroll', { opacity: 0 }, { opacity: 1, duration: 1.2 }, 1.8);
 
   /* ---------- Hero pointer parallax ---------- */
   if (finePointer) {
@@ -641,19 +737,11 @@
     .to('.hero__frames', { autoAlpha: 0, duration: 0.3 }, 0.55)
     .to('.hero__plate', { opacity: 1, duration: 0.2 }, 0.78);
 
-  /* ---------- Manifesto reading effect + counters ---------- */
+  /* ---------- Manifesto reading effect ---------- */
   const words = splitWords($('[data-split]'));
   gsap.to(words, {
     opacity: 1, ease: 'none', stagger: 0.08,
     scrollTrigger: { trigger: '.manifesto__text', start: 'top 82%', end: 'bottom 50%', scrub: 0.8 }
-  });
-  $$('[data-count]').forEach((el) => {
-    const obj = { v: 0 };
-    gsap.to(obj, {
-      v: +el.dataset.count, duration: 2.2, ease: 'power3.out',
-      onUpdate: () => { el.textContent = Math.round(obj.v); },
-      scrollTrigger: { trigger: el, start: 'top 90%', once: true }
-    });
   });
 
   /* ---------- Generic reveals ---------- */
@@ -677,7 +765,7 @@
       onUpdate: (st) => gsap.set('.feature__progress i', { scaleY: st.progress })
     }
   })
-    .fromTo('.feature__sticky', { backgroundColor: '#F7F4EE' }, { backgroundColor: '#171715', ease: 'none', duration: 0.3 }, 0)
+    .fromTo('.feature__sticky', { backgroundColor: '#F7F4EE' }, { backgroundColor: '#171715', ease: 'power2.in', duration: 0.3 }, 0.12)
     .fromTo('.feature__media',
       { clipPath: () => isMobile() ? 'inset(26% 16% 26% 16% round 6px)' : 'inset(22% 34% 22% 34% round 6px)' },
       { clipPath: 'inset(0% 0% 0% 0% round 0px)', ease: 'power2.inOut', duration: 0.45 }, 0)
