@@ -729,8 +729,7 @@
     .to('.hero__shade', { opacity: 0, duration: 0.5 }, 0.15)
     .fromTo('.hero__media',
       { clipPath: 'inset(0% 0% 0% 0% round 0px)' },
-      { clipPath: () => isMobile() ? 'inset(15% 7% 20% 7% round 4px)' : 'inset(11% 25% 15% 25% round 4px)', ease: 'power2.inOut', duration: 0.8, immediateRender: false }, 0.05)
-    .to(frames[0], { xPercent: 90, yPercent: -70, ease: 'none', duration: 0.85 }, 0)
+      { clipPath: () => isMobile() ? 'inset(15% 7% 20% 7% round 4px)' : 'inset(14% 25% 12% 25% round 4px)', ease: 'power2.inOut', duration: 0.8, immediateRender: false }, 0.05)    .to(frames[0], { xPercent: 90, yPercent: -70, ease: 'none', duration: 0.85 }, 0)
     .to(frames[1], { xPercent: 70, yPercent: 60, ease: 'none', duration: 0.85 }, 0)
     .to(frames[2], { xPercent: 160, yPercent: 20, ease: 'none', duration: 0.85 }, 0)
     .to(frames[3], { xPercent: -110, yPercent: -50, ease: 'none', duration: 0.85 }, 0)
